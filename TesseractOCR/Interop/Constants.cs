@@ -29,11 +29,11 @@ namespace TesseractOCR.Interop
     /// </summary>
     internal static class Constants
     {
-        public const string LeptonicaDllName = "org.sw.demo.danbloomberg.leptonica-1.82.0.dll";
-        public const string TesseractDllName = "tesseract50.dll";
+        public const string LeptonicaDllName = "leptonica-1.82.0.dll";
+        public const string TesseractDllName = "tesseract51.dll";
 
         // Tesseract uses an int to represent true false values.
-        public const int TRUE = 1;
-        public const int FALSE = 0;
+        public const int True = 1;
+        public const int False = 0;
     }
 }

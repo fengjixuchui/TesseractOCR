@@ -1,4 +1,6 @@
-﻿using TesseractOCR.Interop;
+﻿using TesseractOCR.Helpers;
+using TesseractOCR.Interop;
+using TesseractOCR.Loggers;
 
 namespace TesseractOCR.Renderers
 {
@@ -9,6 +11,8 @@ namespace TesseractOCR.Renderers
     {
         public TextResult(string outputFilename)
         {
+            Logger.LogInformation("Create text renderer");
+
             var rendererHandle = TessApi.Native.TextRendererCreate(outputFilename);
             Initialize(rendererHandle);
         }

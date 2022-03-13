@@ -22,7 +22,9 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using TesseractOCR.Helpers;
 using TesseractOCR.Internal;
+using TesseractOCR.Loggers;
 
 namespace TesseractOCR.Renderers
 {
@@ -96,20 +98,20 @@ namespace TesseractOCR.Renderers
         {
             Guard.RequireNotNull("title", title);
             VerifyNotDisposed();
-            Guard.Verify(_currentDocumentHandle == null,
-                "Cannot begin document \"{0}\" as another document is currently being processed which must be dispose off first.",
-                title);
+            Guard.Verify(_currentDocumentHandle == null, "Cannot begin document \"{0}\" as another document is currently being processed which must be dispose off first.", title);
 
             // Reset the page number
             PageNumber = -1;
 
             // Begin the document on each child renderer.
             var children = new List<IDisposable>();
+
             try
             {
+                Logger.LogInformation("Begin document");
                 children.AddRange(ResultRenderers.Select(m => m.BeginDocument(title)));
-
                 _currentDocumentHandle = new EndDocumentOnDispose(this, children);
+
                 return _currentDocumentHandle;
             }
             catch (Exception)
@@ -122,7 +124,7 @@ namespace TesseractOCR.Renderers
                     }
                     catch (Exception disposalError)
                     {
-                        Logger.TraceError("Failed to dispose of child document {0}: {1}", child, disposalError.Message);
+                        Logger.LogError($"Failed to dispose of child document {child}, error {disposalError}");
                     }
 
                 throw;
@@ -171,7 +173,7 @@ namespace TesseractOCR.Renderers
             {
                 if (!disposing) return;
 
-                Guard.Verify(Equals(_renderer._currentDocumentHandle, this), "Expected the Result Render's active document to be this document.");
+                Guard.Verify(Equals(_renderer._currentDocumentHandle, this), "Expected the Result Render's active document to be this document");
 
                 // End the renderer
                 foreach (var child in _children)

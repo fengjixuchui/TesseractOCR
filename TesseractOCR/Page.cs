@@ -21,22 +21,62 @@
 
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
 using TesseractOCR.Exceptions;
 using TesseractOCR.Enums;
+using TesseractOCR.Helpers;
 using TesseractOCR.Internal;
 using TesseractOCR.Interop;
+using TesseractOCR.Layout;
+
 // ReSharper disable UnusedMember.Global
 
 namespace TesseractOCR
 {
     public sealed class Page : DisposableBase
     {
-        private static readonly TraceSource Trace = new TraceSource("Tesseract");
+        #region Consts
+        /// <summary>
+        ///     XHTML begin Tag
+        /// </summary>
+        public const string XhtmlBeginTag =
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+            + "<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Transitional//EN\"\n"
+            + "    \"http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd\">\n"
+            + "<html xmlns=\"http://www.w3.org/1999/xhtml\" xml:lang=\"en\" "
+            + "lang=\"en\">\n <head>\n  <title></title>\n"
+            + "<meta http-equiv=\"Content-Type\" content=\"text/html;"
+            + "charset=utf-8\" />\n"
+            + "  <meta name='ocr-system' content='tesseract' />\n"
+            + "  <meta name='ocr-capabilities' content='ocr_page ocr_carea ocr_par"
+            + " ocr_line ocrx_word"
+            + "'/>\n"
+            + "</head>\n<body>\n";
+
+        /// <summary>
+        ///     XHTML end Tag
+        /// </summary>
+        public const string XhtmlEndTag = " </body>\n</html>\n";
+
+        /// <summary>
+        ///     HTML begin tag
+        /// </summary>
+        public const string HtmlBeginTag =
+            "<!DOCTYPE html PUBLIC \"-//W3C//DTD HTML 4.01 Transitional//EN\""
+            + " \"http://www.w3.org/TR/html4/loose.dtd\">\n"
+            + "<html>\n<head>\n<title></title>\n"
+            + "<meta http-equiv=\"Content-Type\" content=\"text/html;"
+            + "charset=utf-8\" />\n<meta name='ocr-system' content='tesseract'/>\n"
+            + "</head>\n<body>\n";
+
+        /// <summary>
+        ///     HTML end tag
+        /// </summary>
+        public const string HtmlEndTag = "</body>\n</html>\n";
+        #endregion
 
         #region Fields
         private bool _runRecognitionPhase;
@@ -45,31 +85,26 @@ namespace TesseractOCR
 
         #region Properties
         /// <summary>
-        ///     <see cref="TesseractEngine"/>
+        ///     Returns a reference to the <see cref="TesseractOCR.Engine"/>
         /// </summary>
-        public TesseractEngine Engine { get; }
+        public Engine Engine { get; }
 
         /// <summary>
-        ///     Gets the <see cref="Pix" /> that is being ocr'd.
+        ///     Returns the <see cref="Pix"/> <see cref="Image" /> that is being ocr'd
         /// </summary>
-        public Pix Image { get; }
+        public Pix.Image Image { get; }
 
         /// <summary>
-        ///     Gets the name of the image being ocr'd.
+        ///     Returns the name of the <see cref="Image"/> being ocr'd
         /// </summary>
         /// <remarks>
         ///     This is also used for some of the more advanced functionality such as identifying the associated UZN file if
-        ///     present.
+        ///     present
         /// </remarks>
         public string ImageName { get; }
 
         /// <summary>
-        ///     Gets the page segmentation mode used to OCR the specified image.
-        /// </summary>
-        public PageSegMode PageSegmentMode { get; }
-
-        /// <summary>
-        ///     The current region of interest being parsed.
+        ///     Returns the current region of interest being parsed
         /// </summary>
         public Rect RegionOfInterest
         {
@@ -78,211 +113,262 @@ namespace TesseractOCR
             {
                 if (value.X1 < 0 || value.Y1 < 0 || value.X2 > Image.Width || value.Y2 > Image.Height)
                     throw new ArgumentException(
-                        "The region of interest to be processed must be within the image bounds.", nameof(value));
+                        "The region of interest to be processed must be within the image bounds", nameof(value));
 
                 if (_regionOfInterest == value) return;
+
                 _regionOfInterest = value;
 
-                // update region of interest in image
+                // Update region of interest in image
                 TessApi.Native.BaseApiSetRectangle(Engine.Handle, _regionOfInterest.X1, _regionOfInterest.Y1,
                     _regionOfInterest.Width, _regionOfInterest.Height);
 
-                // request rerun of recognition on the next call that requires recognition
+                // Request rerun of recognition on the next call that requires recognition
                 _runRecognitionPhase = false;
+            }
+        }
+
+        /// <summary>
+        ///     Return text orientation of each block as determined in an earlier page layout analysis operation.
+        ///     Orientation is returned as the number of ccw 90-degree rotations (in [0..3]) required to make the
+        ///     text in the block upright (readable). Note that this may not necessary be the block orientation preferred
+        ///     for recognition (such as the case of vertical CJK text). Also returns whether the text in the block is
+        ///     believed to have vertical writing direction (when in an upright page orientation).
+        ///     The returned array is of length equal to the number of text blocks, which may be less than the total number of blocks.
+        ///     The ordering is intended to be consistent with GetTextLines().
+        /// </summary>
+        /// <remarks>
+        ///     Item1 = Orientation as the number of ccw 90-degree rotations (in [0..3]) required to make the
+        ///     text in the block upright (readable),br/>
+        ///     Item2 = Returns whether the text in the block is believed to have vertical writing direction
+        ///     (when in an upright page orientation)
+        /// </remarks>
+        public Tuple<int[], bool[]> BlockTextOrientations
+        {
+            get
+            {
+                TessApi.Native.BaseGetBlockTextOrientations(Engine.Handle, out var orientation, out var writing);
+                return new Tuple<int[], bool[]>(orientation, writing);
+            }
+        }
+
+        /// <summary>
+        ///     Returns the segmentation mode used to OCR the specified <see cref="Image"/>
+        /// </summary>
+        public PageSegMode SegmentMode { get; }
+
+        /// <summary>
+        ///     Returns the page number
+        /// </summary>
+        public int Number { get; internal set; }
+
+        /// <summary>
+        ///     Returns the thresholded <see cref="Image"/> that was OCR'd
+        /// </summary>
+        /// <returns>The <see cref="Image"/> in grayscale</returns>
+        public Pix.Image ThresholdedImage
+        {
+            get
+            {
+                Recognize();
+
+                var pixHandle = TessApi.Native.BaseApiGetThresholdedImage(Engine.Handle);
+                if (pixHandle == IntPtr.Zero) throw new TesseractException("Failed to get thresholded image");
+
+                return Pix.Image.Create(pixHandle);
+            }
+        }
+
+        /// <summary>
+        ///     Returns the scale factor for thresholded <see cref="Image"/> that was OCR'd
+        /// </summary>
+        /// <returns>The scale factor</returns>
+        public int ThresholdedImageScaleFactor => TessApi.Native.BaseAPIGetThresholdedImageScaleFactor(Engine.Handle);
+
+        /// <summary>
+        ///     Returns a <see cref="Blocks" /> object that is used to iterate over the page's layout as defined by the
+        ///     current <see cref="RegionOfInterest" />.
+        /// </summary>
+        /// <remarks>
+        ///     A page is build like this --> <see cref="Blocks"/> (with one or more <see cref="Block"/> objects) --> <br/>
+        ///     <see cref="Paragraphs"/> (with one or more <see cref="Paragraph"/> objects) --> <see cref="TextLines"/> <br/>
+        ///     with (one or more in a <see cref="TextLine"/> objects) --> <see cref="Words"/> (with one ore more <br/>
+        ///     <see cref="Word"/> objects) --> <see cref="Symbols"/> (with one ore more <see cref="Symbol"/> objects)
+        /// </remarks>
+        /// <returns>A enumerator at the <see cref="Blocks"/> level</returns>
+        public Blocks Layout
+        {
+            get
+            {
+                Guard.Verify(SegmentMode != PageSegMode.OsdOnly, "Cannot analyse image layout when using OSD only page segmentation, please use DetectBestOrientation instead");
+
+                Recognize();
+                return new Blocks(Engine.Handle, Image.Handle);
+            }
+        }
+
+        /// <summary>
+        ///     Returns the page's content as plain text
+        /// </summary>
+        /// <returns>The OCR'd output as text string</returns>
+        public string Text
+        {
+            get
+            {
+                Recognize();
+                return TessApi.BaseApiGetUTF8Text(Engine.Handle);
+            }
+        }
+
+        /// <summary>
+        ///     Returns the page's content as HOCR text
+        /// </summary>
+        /// <param name="useXHtml">True to use XHTML Output, False to HTML Output</param>
+        /// <returns>The OCR'd output as an HOCR text string</returns>
+        public string HOcrText(bool useXHtml = false)
+        {
+            Recognize();
+
+            var result = TessApi.BaseApiGetHOcrText(Engine.Handle, Number);
+
+            return useXHtml
+                ? XhtmlBeginTag + result + XhtmlEndTag
+                : HtmlBeginTag + result + HtmlEndTag;
+        }
+
+        /// <summary>
+        ///     Return the page's content as an Alto text
+        /// </summary>
+        /// <returns>The OCR'd output as an Alto text string.</returns>
+        public string AltoText
+        {
+            get
+            {
+                Recognize();
+                return TessApi.BaseApiGetAltoText(Engine.Handle, Number);
+            }
+        }
+
+        /// <summary>
+        ///     Return the page's content as TSV text.
+        /// </summary>
+        /// <returns>The OCR'd output as a Tsv text string</returns>
+        public string TsvText
+        {
+            get
+            {
+                Recognize();
+                return TessApi.BaseApiGetTsvText(Engine.Handle, Number);
+            }
+        }
+
+        /// <summary>
+        ///     Returns the page's content as box text
+        /// </summary>
+        /// <returns>The OCR'd output as a box text string</returns>
+        public string BoxText
+        {
+            get
+            {
+                Recognize();
+                return TessApi.BaseApiGetBoxText(Engine.Handle, Number);
+            }
+        }
+
+        /// <summary>
+        ///     Returns the page's content as LSTM box text
+        /// </summary>
+        /// <returns>The OCR'd output as a LSTMBox text string</returns>
+        public string LstmBoxText
+        {
+            get
+            {
+                Recognize();
+                return TessApi.BaseApiGetLSTMBoxText(Engine.Handle, Number);
+            }
+        }
+
+        /// <summary>
+        ///     Returns the page's content as a word string box text
+        /// </summary>
+        /// <returns>The OCR'd output as a WordStrBox text string</returns>
+        public string WordStrBoxText
+        {
+            get
+            {
+                Recognize();
+                return TessApi.BaseApiGetWordStrBoxText(Engine.Handle, Number);
+            }
+        }
+
+        /// <summary>
+        ///     Returns the page's content as UNLV text
+        /// </summary>
+        /// <returns>The OCR'd output as an UNLV text string</returns>
+        public string UnlvText
+        {
+            get
+            {
+                Recognize();
+                return TessApi.BaseApiGetUnlvText(Engine.Handle);
+            }
+        }
+
+        /// <summary>
+        ///     Returns the mean confidence as a percentage of the recognized text
+        /// </summary>
+        /// <returns></returns>
+        public float MeanConfidence
+        {
+            get
+            {
+                Recognize();
+                return TessApi.Native.BaseApiMeanTextConf(Engine.Handle) / 100.0f;
             }
         }
         #endregion
 
         #region Constructor
-        internal Page(TesseractEngine engine, Pix image, string imageName, Rect regionOfInterest, PageSegMode pageSegmentMode)
+        /// <summary>
+        ///     Creates the <see cref="Page"/> object
+        /// </summary>
+        /// <param name="engine"><see cref="TesseractOCR.Engine"/></param>
+        /// <param name="image">The <see cref="Pix"/> <see cref="Image" /> that is being ocr'd</param>
+        /// <param name="imageName">The name of the <see cref="Image" /> being ocr'd</param>
+        /// <param name="regionOfInterest">The current region of interest being parsed</param>
+        /// <param name="segmentMode">The <see cref="PageSegMode"/> used to OCR the specified <see cref="Image" /></param>
+        /// <param name="number">The page number</param>
+        internal Page(
+            Engine engine,
+            Pix.Image image,
+            string imageName,
+            Rect regionOfInterest,
+            PageSegMode segmentMode,
+            int number)
         {
             Engine = engine;
             Image = image;
             ImageName = imageName;
             RegionOfInterest = regionOfInterest;
-            PageSegmentMode = pageSegmentMode;
-        }
-        #endregion
-
-        #region GetThresholdedImage
-        /// <summary>
-        ///     Gets the thresholded image that was OCR'd.
-        /// </summary>
-        /// <returns></returns>
-        public Pix GetThresholdedImage()
-        {
-            Recognize();
-
-            var pixHandle = TessApi.Native.BaseAPIGetThresholdedImage(Engine.Handle);
-            if (pixHandle == IntPtr.Zero) throw new TesseractException("Failed to get thresholded image.");
-
-            return Pix.Create(pixHandle);
-        }
-        #endregion
-
-        #region AnalyseLayout
-        /// <summary>
-        ///     Creates a <see cref="PageIterator" /> object that is used to iterate over the page's layout as defined by the
-        ///     current <see cref="RegionOfInterest" />.
-        /// </summary>
-        /// <returns></returns>
-        public PageIterator AnalyseLayout()
-        {
-            Guard.Verify(PageSegmentMode != PageSegMode.OsdOnly,
-                "Cannot analyse image layout when using OSD only page segmentation, please use DetectBestOrientation instead.");
-
-            var resultIteratorHandle = TessApi.Native.BaseAPIAnalyseLayout(Engine.Handle);
-            return new PageIterator(this, resultIteratorHandle);
-        }
-        #endregion
-
-        #region GetIterator
-        /// <summary>
-        ///     Creates a <see cref="ResultIterator" /> object that is used to iterate over the page as defined by the current
-        ///     <see cref="RegionOfInterest" />.
-        /// </summary>
-        /// <returns></returns>
-        public ResultIterator GetIterator()
-        {
-            Recognize();
-            var resultIteratorHandle = TessApi.Native.BaseApiGetIterator(Engine.Handle);
-            return new ResultIterator(this, resultIteratorHandle);
-        }
-        #endregion
-
-        #region GetText
-        /// <summary>
-        ///     Gets the page's content as plain text.
-        /// </summary>
-        /// <returns></returns>
-        public string GetText()
-        {
-            Recognize();
-            return TessApi.BaseAPIGetUTF8Text(Engine.Handle);
-        }
-        #endregion
-
-        #region GetHOCRText
-        /// <summary>
-        ///     Gets the page's content as an HOCR text.
-        /// </summary>
-        /// <param name="pageNum">The page number (zero based).</param>
-        /// <param name="useXHtml">True to use XHTML Output, False to HTML Output</param>
-        /// <returns>The OCR'd output as an HOCR text string.</returns>
-        public string GetHOCRText(int pageNum, bool useXHtml = false)
-        {
-            // Why Not Use 'nameof(pageNum)' instead of '"pageNum"'
-            Guard.Require("pageNum", pageNum >= 0, "Page number must be greater than or equal to zero (0).");
-            Recognize();
-            return useXHtml
-                ? TessApi.BaseAPIGetHOCRText2(Engine.Handle, pageNum)
-                : TessApi.BaseAPIGetHOCRText(Engine.Handle, pageNum);
-        }
-        #endregion
-
-        #region GetAltoText
-        /// <summary>
-        ///     Gets the page's content as an Alto text.
-        /// </summary>
-        /// <param name="pageNum">The page number (zero based).</param>
-        /// <returns>The OCR'd output as an Alto text string.</returns>
-        public string GetAltoText(int pageNum)
-        {
-            Guard.Require("pageNum", pageNum >= 0, "Page number must be greater than or equal to zero (0).");
-            Recognize();
-            return TessApi.BaseAPIGetAltoText(Engine.Handle, pageNum);
-        }
-        #endregion
-
-        #region GetTsvText
-        /// <summary>
-        ///     Gets the page's content as a Tsv text.
-        /// </summary>
-        /// <param name="pageNum">The page number (zero based).</param>
-        /// <returns>The OCR'd output as a Tsv text string.</returns>
-        public string GetTsvText(int pageNum)
-        {
-            Guard.Require("pageNum", pageNum >= 0, "Page number must be greater than or equal to zero (0).");
-            Recognize();
-            return TessApi.BaseAPIGetTsvText(Engine.Handle, pageNum);
-        }
-        #endregion
-
-        #region GetBoxText
-        /// <summary>
-        ///     Gets the page's content as a Box text.
-        /// </summary>
-        /// <param name="pageNum">The page number (zero based).</param>
-        /// <returns>The OCR'd output as a Box text string.</returns>
-        public string GetBoxText(int pageNum)
-        {
-            Guard.Require("pageNum", pageNum >= 0, "Page number must be greater than or equal to zero (0).");
-            Recognize();
-            return TessApi.BaseAPIGetBoxText(Engine.Handle, pageNum);
-        }
-        #endregion
-
-        #region GetLSTMBoxText
-        /// <summary>
-        ///     Gets the page's content as a LSTMBox text.
-        /// </summary>
-        /// <param name="pageNum">The page number (zero based).</param>
-        /// <returns>The OCR'd output as a LSTMBox text string.</returns>
-        public string GetLSTMBoxText(int pageNum)
-        {
-            Guard.Require("pageNum", pageNum >= 0, "Page number must be greater than or equal to zero (0).");
-            Recognize();
-            return TessApi.BaseAPIGetLSTMBoxText(Engine.Handle, pageNum);
-        }
-        #endregion
-
-        #region GetWordStrBoxText
-        /// <summary>
-        ///     Gets the page's content as a WordStrBox text.
-        /// </summary>
-        /// <param name="pageNum">The page number (zero based).</param>
-        /// <returns>The OCR'd output as a WordStrBox text string.</returns>
-        public string GetWordStrBoxText(int pageNum)
-        {
-            Guard.Require("pageNum", pageNum >= 0, "Page number must be greater than or equal to zero (0).");
-            Recognize();
-            return TessApi.BaseAPIGetWordStrBoxText(Engine.Handle, pageNum);
-        }
-        #endregion
-
-        #region GetUNLVText
-        /// <summary>
-        ///     Gets the page's content as an UNLV text.
-        /// </summary>
-        /// <returns>The OCR'd output as an UNLV text string.</returns>
-        public string GetUNLVText()
-        {
-            Recognize();
-            return TessApi.BaseAPIGetUNLVText(Engine.Handle);
-        }
-        #endregion
-
-        #region GetMeanConfidence
-        /// <summary>
-        ///     Get's the mean confidence that as a percentage of the recognized text.
-        /// </summary>
-        /// <returns></returns>
-        public float GetMeanConfidence()
-        {
-            Recognize();
-            return TessApi.Native.BaseAPIMeanTextConf(Engine.Handle) / 100.0f;
+            SegmentMode = segmentMode;
+            Number = number;
         }
         #endregion
 
         #region GetSegmentedRegions
         /// <summary>
-        ///     Get segmented regions at specified page iterator level.
+        ///     Get segmented regions at specified page iterator level
         /// </summary>
         /// <param name="pageIteratorLevel">PageIteratorLevel enum</param>
-        /// <returns></returns>
+        /// <remarks>
+        ///     This method can be called without triggering the <see cref="Recognize"/> method
+        /// </remarks>
+        /// <returns>A list with <see cref="Rectangle"/>'s</returns>
         public List<Rectangle> GetSegmentedRegions(PageIteratorLevel pageIteratorLevel)
         {
-            var boxArray = TessApi.Native.BaseAPIGetComponentImages(Engine.Handle, pageIteratorLevel, Constants.TRUE, IntPtr.Zero, IntPtr.Zero);
+            Logger.LogInformation("Getting segmented regions");
+
+            var boxArray = TessApi.Native.BaseApiGetComponentImages(Engine.Handle, pageIteratorLevel, Constants.True, IntPtr.Zero, IntPtr.Zero);
             var boxCount = LeptonicaApi.Native.boxaGetCount(new HandleRef(this, boxArray));
             var boxList = new List<Rectangle>();
 
@@ -300,121 +386,112 @@ namespace TesseractOCR
 
             LeptonicaApi.Native.boxaDestroy(ref boxArray);
 
+            Logger.LogInformation($"Found {boxList.Count} region{(boxList.Count == 1 ? string.Empty : "s")}");
+
             return boxList;
         }
         #endregion
 
-        #region DetectBestOrientation
+        #region DetectOrientation
         /// <summary>
-        ///     Detects the page orientation, with corresponding confidence when using <see cref="PageSegMode.OsdOnly" />.
+        ///     Detects the page orientation, with corresponding confidence when using <see cref="PageSegMode.OsdOnly" />
         /// </summary>
         /// <remarks>
-        ///     If using full page segmentation mode (i.e. AutoOsd) then consider using <see cref="AnalyseLayout" /> instead as
-        ///     this also provides a
-        ///     deskew angle which isn't available when just performing orientation detection.
+        ///     If using full page segmentation mode (i.e. AutoOsd) then consider using <see cref="Layout" /> instead as
+        ///     this also provides a deskew angle which isn't available when just performing orientation detection.
         /// </remarks>
-        /// <param name="orientation">The page orientation.</param>
-        /// <param name="confidence">The confidence level of the orientation (15 is reasonably confident).</param>
-        [Obsolete("Use DetectBestOrientation(int orientationDegrees, float confidence) that returns orientation in degrees instead.")]
-        public void DetectBestOrientation(out Orientation orientation, out float confidence)
+        /// <param name="orientation">The detected clockwise page rotation in degrees (0, 90, 180, or 270)</param>
+        /// <param name="confidence">The confidence level of the orientation (15 is reasonably confident)</param>
+        public void DetectOrientation(out int orientation, out float confidence)
         {
-            DetectBestOrientation(out int orientationDegrees, out var orientationConfidence);
-
-            // convert angle to 0-360 (shouldn't be required but do it just o be safe).
-            orientationDegrees %= 360;
-
-            if (orientationDegrees < 0)
-                orientationDegrees += 360;
-
-            if (orientationDegrees > 315 || orientationDegrees <= 45)
-                orientation = Orientation.PageUp;
-            else if (orientationDegrees <= 135)
-                orientation = Orientation.PageRight;
-            else if (orientationDegrees <= 225)
-                orientation = Orientation.PageDown;
-            else
-                orientation = Orientation.PageLeft;
-
-            confidence = orientationConfidence;
+            DetectOrientationAndScript(out orientation, out confidence, out _, out _);
         }
         #endregion
 
-        #region DetectBestOrientation
+        #region DetectOrientationAndScript
         /// <summary>
         ///     Detects the page orientation, with corresponding confidence when using <see cref="PageSegMode.OsdOnly" />.
         /// </summary>
         /// <remarks>
-        ///     If using full page segmentation mode (i.e. AutoOsd) then consider using <see cref="AnalyseLayout" /> instead as
-        ///     this also provides a
-        ///     deskew angle which isn't available when just performing orientation detection.
+        ///     If using full page segmentation mode (i.e. <see cref="PageSegMode.AutoOsd"/>) then consider using <see cref="Layout" />
+        ///     instead as this because this also provides a deskew angle which isn't available when just performing orientation detection.
         /// </remarks>
-        /// <param name="orientation">The detected clockwise page rotation in degrees (0, 90, 180, or 270).</param>
-        /// <param name="confidence">The confidence level of the orientation (15 is reasonably confident).</param>
-        public void DetectBestOrientation(out int orientation, out float confidence)
-        {
-            DetectBestOrientationAndScript(out orientation, out confidence, out _, out _);
-        }
-        #endregion
-
-        #region DetectBestOrientationAndScript
-        /// <summary>
-        ///     Detects the page orientation, with corresponding confidence when using <see cref="PageSegMode.OsdOnly" />.
-        /// </summary>
-        /// <remarks>
-        ///     If using full page segmentation mode (i.e. AutoOsd) then consider using <see cref="AnalyseLayout" /> instead as
-        ///     this also provides a
-        ///     deskew angle which isn't available when just performing orientation detection.
-        /// </remarks>
-        /// <param name="orientation">The detected clockwise page rotation in degrees (0, 90, 180, or 270).</param>
-        /// <param name="confidence">The confidence level of the orientation (15 is reasonably confident).</param>
-        /// <param name="scriptName">The name of the script (e.g. Latin)</param>
+        /// <param name="orientation">The detected clockwise page rotation in degrees (0, 90, 180, or 270)</param>
+        /// <param name="confidence">The confidence level of the orientation (15 is reasonably confident)</param>
+        /// <param name="scriptName"><see cref="ScriptName"/></param>
         /// <param name="scriptConfidence">The confidence level in the script</param>
-        public void DetectBestOrientationAndScript(out int orientation, out float confidence, out string scriptName,
-            out float scriptConfidence)
+        public void DetectOrientationAndScript(out int orientation, out float confidence, out ScriptName scriptName, out float scriptConfidence)
         {
-            if (TessApi.Native.TessBaseAPIDetectOrientationScript(Engine.Handle, out var orientDeg, out var orientConf,
-                    out var scriptNameHandle, out var scriptConf) != 0)
+            Logger.LogInformation("Detection orientation and script name");
+
+            if (TessApi.Native.BaseAPIDetectOrientationScript(Engine.Handle, out var orientDeg, out var orientConf, out var scriptNameHandle, out var scriptConf) != 0)
             {
                 orientation = orientDeg;
                 confidence = orientConf;
-                scriptName = scriptNameHandle != IntPtr.Zero ? MarshalHelper.PtrToString(scriptNameHandle, Encoding.ASCII) : null;
+
+                if (scriptNameHandle != IntPtr.Zero)
+                {
+                    var value = MarshalHelper.PtrToString(scriptNameHandle, Encoding.ASCII);
+                    scriptName = ScriptNameHelper.StringToEnum(value);
+                }
+                else
+                    scriptName = ScriptName.Unknown;
+                
                 scriptConfidence = scriptConf;
+
+                Logger.LogInformation($"Detected orientation '{orientDeg}', confidence '{orientConf}' and script name '{scriptName}', confidence '{scriptConf}'");
             }
             else
-                throw new TesseractException("Failed to detect image orientation.");
+            {
+                const string message = "Failed to detect image orientation";
+                Logger.LogError(message);
+                throw new TesseractException(message);
+            }
         }
         #endregion
 
         #region Recognize
+        /// <summary>
+        ///     Will perform a recognition of the <see cref="Page"/>
+        /// </summary>
+        /// <exception cref="InvalidOperationException"></exception>
         internal void Recognize()
         {
-            Guard.Verify(PageSegmentMode != PageSegMode.OsdOnly, "Cannot OCR image when using OSD only page segmentation, please use DetectBestOrientation instead.");
+            Guard.Verify(SegmentMode != PageSegMode.OsdOnly, "Cannot OCR image when using OSD only page segmentation, please use DetectBestOrientation instead");
 
             if (_runRecognitionPhase)
                 return;
 
-            if (TessApi.Native.BaseApiRecognize(Engine.Handle, new HandleRef(this, IntPtr.Zero)) != 0)
-                throw new InvalidOperationException("Recognition of image failed.");
+            Logger.LogInformation("Recognizing image");
+
+            var monitorHandle = new HandleRef(this, IntPtr.Zero);
+
+            if (TessApi.Native.BaseApiRecognize(Engine.Handle, monitorHandle) != Constants.False)
+            {
+                const string message = "Recognition of image failed";
+                Logger.LogInformation(message);
+                throw new InvalidOperationException(message);
+            }
 
             _runRecognitionPhase = true;
 
+            Logger.LogInformation("Image recognized");
+            
             // Now write out the thresholded image if required to do so
             if (!Engine.TryGetBoolVariable("tessedit_write_images", out var tesseditWriteImages) || !tesseditWriteImages)
                 return;
 
-            using (var thresholdedImage = GetThresholdedImage())
+            using (ThresholdedImage)
             {
                 var filePath = Path.Combine(Environment.CurrentDirectory, "tessinput.tif");
                 try
                 {
-                    thresholdedImage.Save(filePath, ImageFormat.TiffG4);
-                    Trace.TraceEvent(TraceEventType.Information, 2,
-                        "Successfully saved the thresholded image to '{0}'", filePath);
+                    ThresholdedImage.Save(filePath, ImageFormat.TiffG4);
+                    Logger.LogInformation($"Successfully saved the thresholded image to '{filePath}'");
                 }
                 catch (Exception error)
                 {
-                    Trace.TraceEvent(TraceEventType.Error, 2,
-                        "Failed to save the thresholded image to '{0}'.\nError: {1}", filePath, error.Message);
+                    Logger.LogError($"Failed to save the thresholded image to '{filePath}', error: {error}");
                 }
             }
         }
@@ -424,7 +501,7 @@ namespace TesseractOCR
         protected override void Dispose(bool disposing)
         {
             if (disposing)
-                TessApi.Native.BaseAPIClear(Engine.Handle);
+                TessApi.Native.BaseApiClear(Engine.Handle);
         }
         #endregion
     }

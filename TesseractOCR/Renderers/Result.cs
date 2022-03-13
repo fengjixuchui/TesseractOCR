@@ -78,9 +78,6 @@ namespace TesseractOCR.Renderers
             Guard.RequireNotNull("page", page);
             VerifyNotDisposed();
 
-            // TODO: Force page to do a recognize run to ensure the underlying base api is full of state note if
-            // your implementing your own renderer you won't need to do this since all the page operations will do it
-            // implicitly if required. This is why I've only made Page.Recognize internal not public.
             page.Recognize();
 
             return TessApi.Native.ResultRendererAddImage(Handle, page.Engine.Handle) != 0;
@@ -277,7 +274,7 @@ namespace TesseractOCR.Renderers
 
         #region CreateLstmBoxRenderer
         /// <summary>
-        ///     Creates a <see cref="IResult">result renderer</see> that render that generates a unlv
+        ///     Creates a <see cref="IResult">result renderer</see> that render that generates a box
         ///     file from tesseract's output.
         /// </summary>
         /// <param name="outputFilename">The path to the unlv file to be created without the file extension.</param>
@@ -301,15 +298,15 @@ namespace TesseractOCR.Renderers
         }
         #endregion
 
-        #region Initialise
+        #region Initialize
         /// <summary>
         ///     Initialize the render to use the specified native result renderer.
         /// </summary>
         /// <param name="handle"></param>
         protected void Initialize(IntPtr handle)
         {
-            Guard.Require("handle", handle != IntPtr.Zero, "Handle must be initialized.");
-            Guard.Verify(_handle.Handle == IntPtr.Zero, "Result renderer has already been initialized.");
+            Guard.Require("handle", handle != IntPtr.Zero, "Handle must be initialized");
+            Guard.Verify(_handle.Handle == IntPtr.Zero, "Result renderer has already been initialized");
 
             _handle = new HandleRef(this, handle);
         }

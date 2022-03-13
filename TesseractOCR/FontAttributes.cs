@@ -22,20 +22,17 @@
 namespace TesseractOCR
 {
     /// <summary>
-    ///     This class is the return type of
-    ///     ResultIterator.GetWordFontAttributes().  We can't
-    ///     use FontInfo directly because there are properties
-    ///     here that are not accounted for in FontInfo
-    ///     (smallcaps, underline, etc.)  Because of the caching
-    ///     scheme we're using for FontInfo objects, we can't simply
-    ///     augment that class since these extra properties are not
-    ///     accounted for by the FontInfo's unique ID.
+    ///     This struct is the return type of ResultIterator.GetWordFontAttributes().
+    ///     We can't use FontInfo directly because there are properties here that are not
+    ///     accounted for in FontInfo (smallcaps, underline, etc.)  Because of the caching
+    ///     scheme we're using for FontInfo objects, we can't simply augment that class since
+    ///     these extra properties are not accounted for by the FontInfo's unique ID.
     /// </summary>
     public class FontAttributes
     {
         #region Properties
         /// <summary>
-        ///     Returns font information
+        ///     Returns the font information
         /// </summary>
         public FontInfo FontInfo { get; }
 

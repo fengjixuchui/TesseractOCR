@@ -20,7 +20,7 @@
 // limitations under the License.
 
 using System;
-using System.Diagnostics;
+using TesseractOCR.Helpers;
 
 namespace TesseractOCR
 {
@@ -31,23 +31,17 @@ namespace TesseractOCR
         #endregion
 
         #region Properties
-        private static readonly TraceSource Trace = new TraceSource("Tesseract");
-
+        /// <summary>
+        ///     Returns <c>true</c> when this object is disposed
+        /// </summary>
         public bool IsDisposed { get; private set; }
-        #endregion
-
-        #region Constructor
-        protected DisposableBase()
-        {
-            IsDisposed = false;
-        }
         #endregion
 
         #region Destructor
         ~DisposableBase()
         {
             Dispose(false);
-            Trace.TraceEvent(TraceEventType.Warning, 0, "{0} was not disposed off.", this);
+            Logger.LogError($"{this} was not disposed");
         }
         #endregion
 
@@ -66,7 +60,8 @@ namespace TesseractOCR
         #region VerifyNotDisposed
         protected virtual void VerifyNotDisposed()
         {
-            if (IsDisposed) throw new ObjectDisposedException(ToString());
+            if (IsDisposed) 
+                throw new ObjectDisposedException(ToString());
         }
         #endregion
 

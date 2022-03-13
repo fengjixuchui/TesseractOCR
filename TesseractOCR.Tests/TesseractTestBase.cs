@@ -7,10 +7,9 @@ namespace Tesseract.Tests
 {
     public abstract class TesseractTestBase
     {
-        protected static TesseractEngine CreateEngine(string lang = "eng", EngineMode mode = EngineMode.Default)
+        protected static Engine CreateEngine(Language language = Language.English, EngineMode mode = EngineMode.Default)
         {
-            var datapath = DataPath;
-            return new TesseractEngine(datapath, lang, mode);
+            return new Engine(DataPath, language, mode);
         }
 
         protected static string DataPath => AbsolutePath("tessdata");
@@ -38,9 +37,7 @@ namespace Tesseract.Tests
 
         protected static string TestResultRunDirectory(string path)
         {
-            var runPath = AbsolutePath(
-                string.Format("Runs/{0:yyyyMMddTHHmmss}", TestRun.Current.StartedAt)
-            );
+            var runPath = AbsolutePath($"Runs/{TestRun.Current.StartedAt:yyyyMMddTHHmmss}");
             var testResultRunDirectory = Path.Combine(runPath, path);
             Directory.CreateDirectory(testResultRunDirectory);
 
@@ -55,18 +52,18 @@ namespace Tesseract.Tests
             return Path.Combine(testRunDirectory, testFileName);
         }
 
-        protected static Pix LoadTestPix(string filename)
+        protected static TesseractOCR.Pix.Image LoadTestPix(string filename)
         {
             var testFilename = TestFilePath(filename);
-            return Pix.LoadFromFile(testFilename);
+            return TesseractOCR.Pix.Image.LoadFromFile(testFilename);
         }
 
         /// <summary>
-        ///     Normalise new line characters to unix (\n) so they are all the same.
+        ///     Normalize new line characters to unix (\n) so they are all the same.
         /// </summary>
         /// <param name="text"></param>
         /// <returns></returns>
-        protected static string NormaliseNewLine(string text)
+        protected static string NormalizeNewLine(string text)
         {
             return text
                 .Replace("\r\n", "\n")
